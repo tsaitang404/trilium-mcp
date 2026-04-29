@@ -1,0 +1,13 @@
+services:
+  trilium-mcp:
+    build: .
+    container_name: trilium-mcp
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TRILIUM_URL=${TRILIUM_URL}
+      - TRILIUM_TOKEN=${TRILIUM_TOKEN}
+      - TRILIUM_MCP_TRANSPORT=${TRILIUM_MCP_TRANSPORT:-streamable-http}
+    env_file:
+      - .env
