@@ -12,6 +12,8 @@ import os
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 from trilium_py.client import ETAPI
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 
 from trilium_mcp.models import (
     AppInfo,
@@ -33,6 +35,24 @@ class AppContext:
     ea: ETAPI
 
 
+# Minimal TokenVerifier that accepts a single static bearer token.
+class StaticTokenVerifier(TokenVerifier):
+    """Verify bearer token by equality with a static token from env.
+
+    This is intentionally minimal: it returns an AccessToken object when the
+    provided token matches the configured one, otherwise None.
+    """
+
+    def __init__(self, token: str):
+        self._token = token
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if token == self._token:
+            # Return a minimal AccessToken. Fields beyond token are optional.
+            return AccessToken(token=token, client_id="trilium-mcp", scopes=[], expires_at=None)
+        return None
+
+
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     url = os.environ.get("TRILIUM_URL", "http://localhost:8080")
@@ -46,7 +66,29 @@ async def lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         pass  # ETAPI has no explicit close
 
 
-mcp = FastMCP("trilium-mcp", json_response=True, lifespan=lifespan, host="0.0.0.0", port=8000)
+mcp_token = os.environ.get("TRILIUM_MCP_TOKEN") or os.environ.get("TRILIUM_TOKEN")
+# Allow disabling MCP auth explicitly. Defaults to auth enabled when token present.
+auth_disabled = os.environ.get("TRILIUM_MCP_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
+
+# If auth is enabled and we have a token, construct AuthSettings and StaticTokenVerifier
+_mcp_auth_settings = None
+_mcp_token_verifier = None
+if not auth_disabled and mcp_token:
+    _mcp_auth_settings = AuthSettings(
+        issuer_url=os.environ.get("TRILIUM_URL", "http://localhost:8080"),
+        resource_server_url=None,
+    )
+    _mcp_token_verifier = StaticTokenVerifier(mcp_token)
+
+mcp = FastMCP(
+    "trilium-mcp",
+    json_response=True,
+    lifespan=lifespan,
+    host="0.0.0.0",
+    port=8000,
+    auth=_mcp_auth_settings,
+    token_verifier=_mcp_token_verifier,
+)
 
 
 # ── helpers ───────────────────────────────────────────────────────────
